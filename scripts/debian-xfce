@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+
+CONTAINER="debian-xfce"
+PASSWD="$HOME/.config/tigervnc/debian-xfce.passwd"
+
+# Encender el contenedor si está apagado
+if [ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null)" != "true" ]; then
+    docker start "$CONTAINER" >/dev/null || exit 1
+fi
+
+# Esperar hasta que TigerVNC realmente esté funcionando
+for i in {1..30}; do
+    if docker exec "$CONTAINER" pgrep -x Xtigervnc >/dev/null 2>&1; then
+        break
+    fi
+
+    sleep 1
+done
+
+# Un pequeño margen para que termine de inicializar la sesión
+sleep 2
+
+# Abrir directamente sin pedir contraseña
+vncviewer \
+    -passwd "$PASSWD" \
+    localhost::5901
+
+# Al cerrar la ventana, apagar el contenedor
+docker stop "$CONTAINER" >/dev/null
