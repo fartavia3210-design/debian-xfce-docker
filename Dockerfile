@@ -67,7 +67,8 @@ RUN git clone \
         --branch "v${XORGXRDP_VERSION}" \
         https://github.com/neutrinolabs/xorgxrdp.git \
         "/tmp/xorgxrdp-${XORGXRDP_VERSION}" && \
-    cd "/tmp/xorgxrdp-${XORGXRDP_VERSION}" && \
+     cd "/tmp/xorgxrdp-${XORGXRDP_VERSION}" && \
+     sed -i 's/const int vfreq = 50;/const int vfreq = 60;/' module/rdpRandR.c && \
     ./scripts/install_xorgxrdp_build_dependencies_with_apt.sh && \
     ./bootstrap && \
     ./configure --enable-glamor && \
