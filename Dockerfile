@@ -5,24 +5,40 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt update && \
     apt install -y \
         xfce4 \
-        tigervnc-standalone-server \
-        tigervnc-tools \
+        xfce4-terminal \
+        xrdp \
+        xorgxrdp \
         dbus-x11 \
-        procps && \
+        procps \
+        sudo \
+        curl \
+        ca-certificates && \
+    curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg \
+        https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg && \
+    curl -fsSLo /etc/apt/sources.list.d/brave-browser-release.sources \
+        https://brave-browser-apt-release.s3.brave.com/brave-browser.sources && \
+    apt update && \
+    apt install -y brave-browser && \
     apt clean && \
     rm -rf /var/lib/apt/lists/*
 
-RUN mkdir -p /root/.config/tigervnc
+RUN sed -i \
+    's#Exec=/usr/bin/brave-browser-stable#Exec=/usr/bin/brave-browser-stable --no-sandbox#g' \
+    /usr/share/applications/brave-browser.desktop \
+    /usr/share/applications/com.brave.Browser.desktop
 
-COPY xstartup /root/.config/tigervnc/xstartup
-COPY start.sh /usr/local/bin/start-desktop
+RUN useradd -m -s /bin/bash debian && \
+    usermod -aG sudo debian
 
-RUN chmod +x /root/.config/tigervnc/xstartup && \
-    chmod +x /usr/local/bin/start-desktop
+RUN echo "startxfce4" > /home/debian/.xsession && \
+    chown debian:debian /home/debian/.xsession
 
-EXPOSE 5901
+COPY start.sh /usr/local/bin/start-rdp
 
-ENV VNC_RESOLUTION=1280x1080
+RUN chmod +x /usr/local/bin/start-rdp
 
-CMD ["/usr/local/bin/start-desktop"]
+ENV RDP_USER=debian
 
+EXPOSE 3389
+
+CMD ["/usr/local/bin/start-rdp"]

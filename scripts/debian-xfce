@@ -1,29 +1,159 @@
 #!/usr/bin/env bash
 
-CONTAINER="debian-xfce"
-PASSWD="$HOME/.config/tigervnc/debian-xfce.passwd"
+set -e
 
-# Encender el contenedor si está apagado
-if [ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null)" != "true" ]; then
-    docker start "$CONTAINER" >/dev/null || exit 1
+CONTAINER="debian-xfce-rdp"
+
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/debian-xfce-docker"
+CONFIG_FILE="$CONFIG_DIR/config"
+
+# Valores genéricos por defecto
+WINDOW_PERCENT_W=90
+WINDOW_PERCENT_H=90
+
+# Configuración personal opcional
+if [ -f "$CONFIG_FILE" ]; then
+    source "$CONFIG_FILE"
 fi
 
-# Esperar hasta que TigerVNC realmente esté funcionando
+# Comprobar dependencias
+if ! command -v docker >/dev/null 2>&1; then
+    echo "ERROR: Docker no está instalado."
+    exit 1
+fi
+
+if command -v sdl-freerdp3 >/dev/null 2>&1; then
+    RDP_CLIENT="sdl-freerdp3"
+elif command -v xfreerdp3 >/dev/null 2>&1; then
+    RDP_CLIENT="xfreerdp3"
+else
+    echo "ERROR: FreeRDP 3 no está instalado."
+    exit 1
+fi
+
+# Comprobar que el contenedor existe
+if ! docker inspect "$CONTAINER" >/dev/null 2>&1; then
+    echo "ERROR: No existe el contenedor $CONTAINER."
+    exit 1
+fi
+
+STARTED_BY_LAUNCHER=0
+
+cleanup() {
+    if [ "$STARTED_BY_LAUNCHER" -eq 1 ]; then
+        docker stop "$CONTAINER" >/dev/null 2>&1 || true
+    fi
+}
+
+trap cleanup EXIT INT TERM
+
+# Arrancar Docker únicamente si estaba detenido
+if [ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER")" != "true" ]; then
+    docker start "$CONTAINER" >/dev/null
+    STARTED_BY_LAUNCHER=1
+fi
+
+# Esperar hasta que XRDP y sesman estén preparados
 for i in {1..30}; do
-    if docker exec "$CONTAINER" pgrep -x Xtigervnc >/dev/null 2>&1; then
+    if docker exec "$CONTAINER" pgrep -x xrdp >/dev/null 2>&1 &&
+       docker exec "$CONTAINER" pgrep -x xrdp-sesman >/dev/null 2>&1; then
         break
     fi
 
     sleep 1
 done
 
-# Un pequeño margen para que termine de inicializar la sesión
-sleep 2
+sleep 1
 
-# Abrir directamente sin pedir contraseña
-vncviewer \
-    -passwd "$PASSWD" \
-    localhost::5901
+# Leer las credenciales configuradas en el contenedor
+RDP_USER="$(
+    docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$CONTAINER" |
+    sed -n 's/^RDP_USER=//p' |
+    tail -n 1
+)"
 
-# Al cerrar la ventana, apagar el contenedor
-docker stop "$CONTAINER" >/dev/null
+RDP_PASSWORD="$(
+    docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$CONTAINER" |
+    sed -n 's/^RDP_PASSWORD=//p' |
+    tail -n 1
+)"
+
+if [ -z "$RDP_USER" ] || [ -z "$RDP_PASSWORD" ]; then
+    echo "ERROR: No se encontraron RDP_USER o RDP_PASSWORD."
+    exit 1
+fi
+
+
+# Detectar automáticamente el tamaño del monitor
+get_screen_size() {
+
+    # Hyprland
+    if command -v hyprctl >/dev/null 2>&1; then
+        SIZE="$(
+            hyprctl monitors | awk '
+                /^Monitor / {
+                    res=""
+                    scale=1
+                }
+
+                /^[[:space:]]+[0-9]+x[0-9]+@/ {
+                    split($1, r, "@")
+                    res=r[1]
+                }
+
+                /^[[:space:]]*scale:/ {
+                    scale=$2
+                }
+
+                /^[[:space:]]*focused:/ && $2 == "yes" {
+                    split(res, d, "x")
+                    printf "%d %d\n", d[1] / scale, d[2] / scale
+                    exit
+                }
+            '
+        )"
+
+        if [ -n "$SIZE" ]; then
+            echo "$SIZE"
+            return
+        fi
+    fi
+
+    # X11 / fallback para otros escritorios Linux
+    if command -v xrandr >/dev/null 2>&1; then
+        SIZE="$(
+            xrandr --current |
+            awk '/\*/ {print $1; exit}' |
+            tr 'x' ' '
+        )"
+
+        if [ -n "$SIZE" ]; then
+            echo "$SIZE"
+            return
+        fi
+    fi
+
+    # Último fallback
+    echo "1920 1080"
+}
+
+read -r SCREEN_W SCREEN_H < <(get_screen_size)
+
+WINDOW_W=$(( SCREEN_W * WINDOW_PERCENT_W / 100 ))
+WINDOW_H=$(( SCREEN_H * WINDOW_PERCENT_H / 100 ))
+
+echo "Monitor detectado: ${SCREEN_W}x${SCREEN_H}"
+echo "Ventana Debian XFCE: ${WINDOW_W}x${WINDOW_H}"
+
+
+# Abrir Debian XFCE
+{
+    printf '/v:127.0.0.1:3389\n'
+    printf '/u:%s\n' "$RDP_USER"
+    printf '/p:%s\n' "$RDP_PASSWORD"
+    printf '/size:%sx%s\n' "$WINDOW_W" "$WINDOW_H"
+    printf '+decorations\n'
+    printf '+clipboard\n'
+    printf '/cert:ignore\n'
+    printf '/t:Debian XFCE\n'
+} | "$RDP_CLIENT" /args-from:stdin
