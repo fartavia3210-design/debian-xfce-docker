@@ -2,12 +2,7 @@
 
 set -e
 
-if [ -z "$RDP_PASSWORD" ]; then
-    echo "ERROR: Debes definir RDP_PASSWORD"
-    exit 1
-fi
-
-echo "${RDP_USER}:${RDP_PASSWORD}" | chpasswd
+RDP_USER="${RDP_USER:-debian}"
 
 # ============================================================
 # Runtime de XRDP
