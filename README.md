@@ -1,92 +1,136 @@
 # Debian XFCE Docker
 
-Escritorio **Debian 13 + XFCE** ejecutándose dentro de un contenedor Docker y accesible mediante **XRDP + FreeRDP 3**.
+Debian 13 con escritorio **XFCE** ejecutándose dentro de Docker y accesible mediante **XRDP + FreeRDP 3**.
 
-El proyecto permite tener un escritorio Linux completo y aislado sin necesidad de ejecutar una máquina virtual pesada.
+Este repositorio contiene la imagen base de Debian + XFCE que posteriormente será integrada en el proyecto principal **Linux Desktop Containers**.
 
-Incluye soporte para:
+La meta es ofrecer un escritorio Linux completo, ligero y aislado, sin necesidad de ejecutar una máquina virtual completa.
 
-* XFCE 4
+---
+
+# Estado actual
+
+La imagen Standard se encuentra funcional y probada con:
+
+* Debian 13
+* XFCE
 * XRDP 0.10.6.1
 * xorgxrdp 0.10.5
+* Xorg
 * H.264 mediante x264
-* RFX como fallback
-* pantalla virtual a 60 Hz
-* audio mediante PipeWire + XRDP
-* portapapeles bidireccional
-* resolución y tamaño de ventana automáticos
+* pantalla virtual configurada a 60 Hz
+* audio RDP mediante PipeWire
+* WirePlumber
+* `pipewire-pulse`
+* `pipewire-module-xrdp`
+* portapapeles RDP
 * Brave Browser
-* launcher automático
-* SDL-FreeRDP 3
-* XFreeRDP 3 como alternativa
-* `/dev/shm` ampliado a 1 GB
+* sandbox real de Brave
+* usuario RDP predeterminado
+* contraseña RDP predeterminada
+* `/dev/shm` de 1 GB recomendado
+
+La imagen fue probada correctamente en sesiones RDP desde diferentes hosts Linux.
+
+---
+
+# Objetivo del repositorio
+
+Este repositorio **no pretende ser el administrador final de escritorios**.
+
+Su función es desarrollar y estabilizar la imagen:
+
+```text
+Debian 13
+   +
+XFCE
+   +
+XRDP
+   +
+Audio
+   +
+Brave
+```
+
+El proyecto principal:
+
+```text
+Linux Desktop Containers
+```
+
+será el responsable posteriormente de:
+
+* instalar dependencias del host;
+* descargar imágenes desde GHCR;
+* crear contenedores;
+* asignar puertos;
+* aplicar perfiles de seguridad;
+* detectar SELinux/AppArmor;
+* crear accesos directos;
+* ejecutar FreeRDP;
+* administrar múltiples distribuciones y escritorios.
+
+Repositorio principal:
+
+```text
+https://github.com/fartavia3210-design/linux-desktop-containers
+```
 
 ---
 
 # Arquitectura
 
-Este proyecto **no es una máquina virtual**.
-
-Docker comparte el kernel Linux del host mientras Debian ejecuta su propio:
-
-* userspace
-* escritorio
-* aplicaciones
-* servidor gráfico
-* sesión XRDP
-* stack de audio
-
-La arquitectura general es:
+La arquitectura actual es:
 
 ```text
-Linux Host
+Host Linux
     │
     ▼
-Docker Engine
+Docker
     │
     ▼
-Debian 13 Container
+Debian 13
     │
     ├── XFCE
-    │
     ├── Xorg
-    │
     ├── xorgxrdp
-    │
+    ├── XRDP
     ├── PipeWire
-    │
     ├── WirePlumber
+    ├── Brave
+    └── aplicaciones
     │
-    └── XRDP
+    ▼
+RDP
     │
     ▼
 FreeRDP 3
     │
     ▼
-Desktop Window
+Ventana del escritorio Debian
 ```
+
+Docker comparte el kernel del host, por lo que esto **no es una máquina virtual tradicional**.
 
 ---
 
-# Características
+# Componentes principales
 
-## Debian 13
+## Debian
 
-La imagen utiliza:
+Imagen base:
 
 ```text
 debian:13
 ```
 
-como base.
-
 ---
 
 ## XFCE
 
-El entorno de escritorio utilizado es **XFCE**, elegido por su bajo consumo de recursos y buen funcionamiento dentro de contenedores.
+El escritorio utiliza XFCE por su bajo consumo de recursos y buena compatibilidad con Xorg/XRDP.
 
-Se incluyen, entre otros:
+Se instalan, entre otros:
 
 ```text
 xfce4
@@ -99,56 +143,55 @@ xserver-xorg-core
 
 # XRDP
 
-El proyecto no utiliza simplemente la versión de XRDP incluida por defecto en Debian.
+XRDP se compila desde código fuente.
 
-Durante el build se compilan desde código fuente:
+Versión:
 
 ```text
-XRDP:      0.10.6.1
-xorgxrdp:  0.10.5
+0.10.6.1
 ```
 
-XRDP se construye con soporte para:
+Configuración utilizada:
 
-* PAM
-* IPv6
-* JPEG
-* FUSE
-* Opus
-* Pixman
-* H.264/x264
+```text
+--enable-pam
+--enable-ipv6
+--enable-jpeg
+--enable-fuse
+--enable-opus
+--enable-pixman
+--enable-x264
+```
+
+Esto permite utilizar funcionalidades gráficas modernas de XRDP, incluyendo H.264 mediante x264.
 
 ---
 
-# H.264 / x264
+# xorgxrdp
 
-XRDP utiliza su Graphics Pipeline con soporte para H.264.
-
-La configuración está orientada a escritorio remoto de baja latencia.
-
-El encoder utilizado actualmente es:
+Versión:
 
 ```text
-x264
+0.10.5
 ```
 
-Por tanto, la codificación H.264 se realiza actualmente mediante **CPU/software**.
+También se compila desde código fuente.
 
-La configuración está orientada a:
+Configuración:
 
 ```text
-preset: ultrafast
-tune: zerolatency
-objetivo: 60 FPS
+--enable-glamor
 ```
 
-Si H.264 no puede negociarse, XRDP puede utilizar **RFX como fallback**.
+> `--enable-glamor` por sí solo no significa que esta imagen tenga una ruta completa de aceleración GPU.
+
+Actualmente el modo Standard sigue estando diseñado para funcionar sin requerir acceso directo a GPU.
 
 ---
 
 # 60 Hz
 
-Durante la compilación de xorgxrdp se modifica su frecuencia virtual:
+Durante el build se modifica xorgxrdp para cambiar:
 
 ```c
 const int vfreq = 50;
@@ -160,21 +203,44 @@ por:
 const int vfreq = 60;
 ```
 
-Esto permite que la sesión RDP pueda reportar una pantalla virtual cercana a:
+Esto permite que la pantalla virtual de la sesión XRDP trabaje a aproximadamente:
 
 ```text
-60.00 Hz
+60 Hz
 ```
-
-La resolución real depende del tamaño solicitado por el cliente FreeRDP.
 
 ---
 
-# Audio
+# H.264
 
-El proyecto utiliza **PipeWire** para transportar el audio generado dentro del contenedor hacia el host mediante XRDP.
+XRDP se compila con:
 
-Stack utilizado:
+```text
+--enable-x264
+```
+
+Por lo tanto, esta imagen puede utilizar H.264 mediante x264.
+
+Actualmente la codificación se realiza principalmente mediante **CPU/software**.
+
+No se utiliza todavía:
+
+* VA-API;
+* NVENC;
+* AMF;
+* Quick Sync;
+* `/dev/dri/renderD*`;
+* codificación H.264 por hardware.
+
+Estas opciones pertenecen a futuros experimentos de rendimiento.
+
+---
+
+# Audio RDP
+
+El audio está completamente implementado mediante PipeWire.
+
+Paquetes principales:
 
 ```text
 pipewire
@@ -184,39 +250,97 @@ pipewire-module-xrdp
 pulseaudio-utils
 ```
 
-El antiguo servidor PulseAudio no se utiliza como servidor principal.
+El servidor PulseAudio tradicional no se utiliza.
 
-La arquitectura de audio es:
+La arquitectura es:
 
 ```text
-Aplicación dentro de Debian
-        │
-        ▼
+Aplicación Debian
+       │
+       ▼
 pipewire-pulse
-        │
-        ▼
+       │
+       ▼
 PipeWire
-        │
-        ▼
+       │
+       ▼
 pipewire-module-xrdp
-        │
-        ├── xrdp-sink
-        └── xrdp-source
-        │
-        ▼
+       │
+       ├── xrdp-sink
+       └── xrdp-source
+       │
+       ▼
 xrdp-chansrv
-        │
-        ▼
+       │
+       ▼
 RDP Audio
-        │
-        ▼
+       │
+       ▼
 FreeRDP /sound
-        │
-        ▼
+       │
+       ▼
 Audio del host
 ```
 
-La sesión XFCE inicia automáticamente:
+Durante una sesión funcional se verificó:
+
+```text
+Server Name: PulseAudio (on PipeWire 1.4.2)
+Default Sink: xrdp-sink
+Default Source: xrdp-source
+```
+
+También se comprobaron los procesos:
+
+```text
+pipewire
+wireplumber
+pipewire-pulse
+xrdp-chansrv
+```
+
+---
+
+# Inicio de la sesión
+
+El contenedor utiliza:
+
+```text
+start.sh
+```
+
+para preparar XRDP y el runtime del usuario.
+
+El flujo es:
+
+```text
+Docker
+   │
+   ▼
+start.sh
+   │
+   ├── /run/xrdp
+   ├── /run/user/<UID>
+   ├── xrdp-sesman
+   └── xrdp
+```
+
+Cuando el usuario inicia sesión:
+
+```text
+XRDP
+   │
+   ▼
+~/.xsession
+   │
+   ▼
+dbus-run-session
+   │
+   ▼
+start-xfce-xrdp
+```
+
+`start-xfce-xrdp` inicia:
 
 ```text
 PipeWire
@@ -225,87 +349,209 @@ pipewire-pulse
 XFCE
 ```
 
-El módulo `pipewire-module-xrdp` se carga dentro de la sesión gráfica y crea:
-
-```text
-xrdp-sink
-xrdp-source
-```
-
-El launcher activa el audio de FreeRDP mediante:
-
-```text
-/sound
-```
-
 ---
 
-# Portapapeles
+# Usuario y contraseña
 
-El launcher activa integración de portapapeles mediante FreeRDP:
+La imagen ya incluye una credencial RDP interna predeterminada.
 
-```text
-+clipboard
-```
-
-Esto permite copiar y pegar entre:
+Usuario:
 
 ```text
-Host ↔ Debian XFCE
+debian
 ```
+
+Contraseña:
+
+```text
+1234
+```
+
+La contraseña se establece durante el build.
+
+Por lo tanto, **ya no es necesario pasar**:
+
+```text
+-e RDP_PASSWORD=...
+```
+
+al crear el contenedor.
+
+Esto está pensado para el modo local del proyecto, donde XRDP se publica únicamente sobre:
+
+```text
+127.0.0.1
+```
+
+La contraseña `1234` no debe considerarse una contraseña segura para publicar XRDP directamente a Internet.
 
 ---
 
 # Brave Browser
 
-Brave Browser se instala automáticamente durante el build.
+Brave Browser se instala desde su repositorio oficial durante el build.
 
-> [!WARNING]
-> Actualmente esta versión del proyecto todavía inicia Brave utilizando `--no-sandbox`.
->
-> Esta configuración está pendiente de ser sustituida por una implementación con sandbox real antes de considerar la parte de seguridad completamente terminada.
+La imagen **ya no utiliza**:
+
+```text
+--no-sandbox
+```
+
+Brave se ejecuta con su sandbox real.
+
+---
+
+# Sandbox de Brave
+
+Para que Brave pueda ejecutar correctamente su sandbox dentro de Docker, el contenedor debe crearse utilizando el perfil seccomp del proyecto principal:
+
+```text
+common/security/seccomp-brave.json
+```
+
+El perfil se encuentra en:
+
+```text
+linux-desktop-containers/common/security/seccomp-brave.json
+```
+
+La imagen fue probada con dicho perfil.
+
+En:
+
+```text
+brave://sandbox
+```
+
+se obtuvo:
+
+```text
+Layer 1 Sandbox                         Namespace
+PID namespaces                          Yes
+Network namespaces                      Yes
+Seccomp-BPF sandbox                     Yes
+Seccomp-BPF sandbox supports TSYNC      Yes
+Ptrace Protection with Yama LSM         Yes
+```
+
+Brave reportó:
+
+```text
+You are adequately sandboxed.
+```
+
+Por lo tanto, Brave funciona sin:
+
+```text
+--no-sandbox
+```
+
+y sin:
+
+```text
+--privileged
+```
+
+ni:
+
+```text
+seccomp=unconfined
+```
+
+---
+
+# Yama LSM
+
+En algunas máquinas:
+
+```text
+Ptrace Protection with Yama LSM (Non-broker)
+```
+
+puede aparecer como:
+
+```text
+No
+```
+
+mientras el resto del sandbox aparece correctamente activo.
+
+Esto no implica por sí solo que Brave esté funcionando sin sandbox.
+
+La validación realizada mostró:
+
+```text
+You are adequately sandboxed.
+```
+
+junto con Namespace Sandbox y Seccomp-BPF activos.
 
 ---
 
 # `/dev/shm`
 
-Se recomienda crear el contenedor con:
+El contenedor debe crearse con:
 
 ```text
 --shm-size=1g
 ```
 
-No se recomienda utilizar el valor predeterminado pequeño de Docker, especialmente para navegadores basados en Chromium como Brave.
+No se recomienda utilizar el valor predeterminado pequeño de Docker.
+
+Esto es especialmente importante para navegadores Chromium/Brave.
+
+---
+
+# Seguridad de red
+
+Para el modo Standard local, XRDP debe publicarse únicamente sobre:
+
+```text
+127.0.0.1
+```
+
+Ejemplo:
+
+```text
+127.0.0.1:3392:3389
+```
+
+Esto significa que XRDP solamente puede ser accedido desde el propio host.
+
+No se recomienda publicar directamente:
+
+```text
+0.0.0.0:3389
+```
+
+especialmente utilizando la contraseña interna predeterminada.
+
+El soporte remoto mediante VPN/servidor podrá añadirse en el futuro como una arquitectura separada.
 
 ---
 
 # Requisitos
 
-El host debe utilizar Linux y disponer de:
+Para realizar pruebas manuales se necesita:
 
+* Linux
 * Docker
 * Git
 * FreeRDP 3
 
-El launcher soporta:
+El proyecto ha sido desarrollado principalmente desde:
 
 ```text
-sdl-freerdp3
+CachyOS / Arch Linux
 ```
 
-y como alternativa:
-
-```text
-xfreerdp3
-```
-
-Actualmente el launcher prefiere SDL-FreeRDP cuando ambos están disponibles.
+y también se ha probado desde otros hosts Linux.
 
 ---
 
 # Instalación en Arch Linux / CachyOS
 
-Instala las dependencias:
+Instala:
 
 ```bash
 sudo pacman -S docker freerdp git
@@ -317,13 +563,13 @@ Activa Docker:
 sudo systemctl enable --now docker
 ```
 
-Agrega tu usuario al grupo Docker:
+Agrega el usuario actual al grupo Docker:
 
 ```bash
 sudo usermod -aG docker "$USER"
 ```
 
-Después debes **cerrar sesión y volver a entrar**, o reiniciar el equipo, para que el nuevo grupo tenga efecto.
+Después cierra sesión y vuelve a entrar, o reinicia el equipo.
 
 Comprueba:
 
@@ -331,17 +577,45 @@ Comprueba:
 docker info
 ```
 
-Si funciona sin `sudo`, Docker está listo.
+Debe funcionar sin utilizar `sudo`.
 
 ---
 
-# Clonar el repositorio
+# Instalación en Debian / Ubuntu
+
+Instala Git y FreeRDP junto con Docker utilizando los paquetes apropiados para tu distribución.
+
+Después comprueba:
+
+```bash
+docker --version
+```
+
+y:
+
+```bash
+xfreerdp3 /version
+```
+
+o:
+
+```bash
+sdl-freerdp3 /version
+```
+
+Dependiendo del cliente disponible.
+
+El usuario que ejecuta el proyecto debe tener permiso para utilizar Docker.
+
+---
+
+# Clonar este repositorio
 
 ```bash
 git clone https://github.com/fartavia3210-design/debian-xfce-docker.git
 ```
 
-Entra al proyecto:
+Entra:
 
 ```bash
 cd debian-xfce-docker
@@ -351,253 +625,118 @@ cd debian-xfce-docker
 
 # Construir la imagen
 
-Construye la imagen:
-
 ```bash
 docker build -t debian-xfce:latest .
 ```
 
-La primera compilación puede tardar varios minutos porque XRDP y xorgxrdp se compilan desde código fuente.
+La primera compilación puede tardar varios minutos porque:
 
-Comprueba que exista:
+* XRDP se compila desde source;
+* xorgxrdp se compila desde source;
+* Brave se instala;
+* XFCE y PipeWire se instalan.
+
+Para hacer un build totalmente limpio:
 
 ```bash
-docker images | grep debian-xfce
-```
-
-Deberías ver algo parecido a:
-
-```text
-debian-xfce   latest
+docker build --no-cache -t debian-xfce:latest .
 ```
 
 ---
 
-# Crear el contenedor
+# Perfil seccomp de Brave
 
-Crea el contenedor con:
+Para ejecutar Brave con su sandbox completo se necesita:
+
+```text
+seccomp-brave.json
+```
+
+Actualmente este perfil pertenece al proyecto principal:
+
+```text
+linux-desktop-containers/common/security/seccomp-brave.json
+```
+
+Si tienes ambos proyectos:
+
+```text
+~/Documentos/Proyectos/Distro Dockers/
+├── debian-xfce-docker/
+└── linux-desktop-containers/
+```
+
+el perfil se encuentra en:
+
+```text
+~/Documentos/Proyectos/Distro Dockers/linux-desktop-containers/common/security/seccomp-brave.json
+```
+
+---
+
+# Crear un contenedor manualmente
+
+Ejemplo para pruebas locales:
 
 ```bash
-docker create \
-    --name debian-xfce-rdp \
+docker run -d \
+    --name debian-xfce \
     --shm-size=1g \
     -p 127.0.0.1:3389:3389 \
-    -e RDP_PASSWORD='TU_CONTRASEÑA' \
+    --security-opt seccomp="$HOME/Documentos/Proyectos/Distro Dockers/linux-desktop-containers/common/security/seccomp-brave.json" \
     debian-xfce:latest
 ```
 
-Cambia:
+No es necesario pasar ninguna contraseña mediante variables de entorno.
 
-```text
-TU_CONTRASEÑA
-```
+---
 
-por la contraseña que quieras utilizar.
+# Si el puerto 3389 está ocupado
+
+Puedes utilizar otro puerto del host.
 
 Por ejemplo:
 
 ```bash
-docker create \
-    --name debian-xfce-rdp \
+docker run -d \
+    --name debian-xfce \
     --shm-size=1g \
-    -p 127.0.0.1:3389:3389 \
-    -e RDP_PASSWORD='debian123' \
+    -p 127.0.0.1:3390:3389 \
+    --security-opt seccomp="$HOME/Documentos/Proyectos/Distro Dockers/linux-desktop-containers/common/security/seccomp-brave.json" \
     debian-xfce:latest
 ```
 
-El usuario interno del escritorio es:
+Aquí:
 
 ```text
-debian
+3390 = puerto del host
+3389 = puerto XRDP dentro del contenedor
 ```
 
 ---
 
-# ¿Por qué `127.0.0.1`?
+# Abrir Debian XFCE manualmente
 
-El puerto se publica como:
-
-```text
-127.0.0.1:3389
-```
-
-en lugar de:
-
-```text
-0.0.0.0:3389
-```
-
-De esta forma XRDP solamente queda accesible desde el mismo host y no se expone directamente a otros dispositivos de la red.
-
----
-
-# Instalar el launcher
-
-El repositorio incluye:
-
-```text
-scripts/debian-xfce
-```
-
-Cópialo a:
-
-```text
-~/.local/bin
-```
-
-con:
-
-```bash
-mkdir -p ~/.local/bin
-cp scripts/debian-xfce ~/.local/bin/debian-xfce
-chmod +x ~/.local/bin/debian-xfce
-```
-
-Comprueba:
-
-```bash
-command -v debian-xfce
-```
-
-Si devuelve:
-
-```text
-/home/TU_USUARIO/.local/bin/debian-xfce
-```
-
-ya está listo.
-
----
-
-# Abrir Debian XFCE
-
-Una vez construida la imagen, creado el contenedor e instalado el launcher, simplemente ejecuta:
-
-```bash
-debian-xfce
-```
-
-El launcher automáticamente:
-
-1. Comprueba que Docker esté instalado.
-2. Comprueba que exista `debian-xfce-rdp`.
-3. Detecta SDL-FreeRDP 3 o XFreeRDP 3.
-4. Arranca el contenedor si estaba detenido.
-5. Espera a que XRDP y `xrdp-sesman` estén preparados.
-6. Lee las credenciales RDP desde la configuración del contenedor.
-7. Detecta el tamaño del monitor.
-8. Calcula el tamaño inicial de la ventana.
-9. Abre Debian XFCE mediante FreeRDP.
-10. Activa portapapeles.
-11. Activa audio.
-12. Detiene el contenedor al cerrar la ventana si fue el launcher quien lo inició.
-
----
-
-# Tamaño automático de la ventana
-
-Por defecto el launcher utiliza aproximadamente:
-
-```text
-90 % del ancho
-90 % del alto
-```
-
-del monitor.
-
-En Hyprland utiliza:
-
-```text
-hyprctl
-```
-
-para detectar el monitor activo.
-
-En escritorios X11 utiliza:
-
-```text
-xrandr
-```
-
-como fallback.
-
-Si ninguno está disponible utiliza:
-
-```text
-1920x1080
-```
-
-como último fallback.
-
----
-
-# Configurar el tamaño de la ventana
-
-Puedes crear:
-
-```text
-~/.config/debian-xfce-docker/config
-```
-
-Por ejemplo:
-
-```bash
-mkdir -p ~/.config/debian-xfce-docker
-nano ~/.config/debian-xfce-docker/config
-```
-
-Y configurar:
-
-```bash
-WINDOW_PERCENT_W=85
-WINDOW_PERCENT_H=85
-```
-
-Por ejemplo, para utilizar casi toda la pantalla:
-
-```bash
-WINDOW_PERCENT_W=95
-WINDOW_PERCENT_H=95
-```
-
----
-
-# Abrir manualmente sin launcher
-
-También puedes iniciar todo manualmente.
-
-Primero arranca el contenedor:
-
-```bash
-docker start debian-xfce-rdp
-```
-
-Comprueba:
-
-```bash
-docker ps --filter name=debian-xfce-rdp
-```
-
-Después conecta con XFreeRDP:
+Con XFreeRDP 3:
 
 ```bash
 xfreerdp3 \
-    /v:127.0.0.1:3389 \
+    /v:127.0.0.1:3390 \
     /u:debian \
-    /p:'TU_CONTRASEÑA' \
+    /p:1234 \
     /cert:ignore \
     /dynamic-resolution \
     /clipboard \
     /sound
 ```
 
-O con SDL-FreeRDP:
+Con SDL-FreeRDP:
 
 ```bash
 sdl-freerdp3 \
-    /v:127.0.0.1:3389 \
+    /v:127.0.0.1:3390 \
     /u:debian \
-    /p:'TU_CONTRASEÑA' \
+    /p:1234 \
     /cert:ignore \
     /dynamic-resolution \
     /clipboard \
@@ -606,75 +745,101 @@ sdl-freerdp3 \
 
 ---
 
-# Detener Debian XFCE
+# Parámetros RDP probados
 
-Si utilizaste el launcher y fue el launcher quien arrancó el contenedor, este lo detendrá automáticamente cuando cierres FreeRDP.
+Para Debian XFCE se ha probado correctamente:
 
-También puedes detenerlo manualmente:
+```text
+/dynamic-resolution
+/clipboard
+/sound
+/cert:ignore
+```
+
+Estos parámetros no deben asumirse necesariamente como óptimos para todas las demás distribuciones.
+
+El proyecto principal Linux Desktop Containers podrá definir parámetros RDP específicos por combinación:
+
+```text
+Distribución + Escritorio
+```
+
+por ejemplo:
+
+```text
+Arch + XFCE
+Debian + XFCE
+Fedora + KDE
+Ubuntu + GNOME
+```
+
+Esto evita modificar una configuración estable de una distribución para solucionar otra.
+
+---
+
+# Comprobar que el contenedor está activo
 
 ```bash
-docker stop debian-xfce-rdp
+docker ps
+```
+
+O:
+
+```bash
+docker ps --filter name=debian-xfce
 ```
 
 ---
 
-# Volver a abrirlo
-
-No necesitas reconstruir la imagen cada vez.
-
-Simplemente ejecuta:
+# Detener el contenedor
 
 ```bash
-debian-xfce
+docker stop debian-xfce
 ```
-
-El contenedor existente será reutilizado.
 
 ---
 
-# Estado del contenedor
-
-Verifica si está ejecutándose:
+# Volver a iniciarlo
 
 ```bash
-docker ps --filter name=debian-xfce-rdp
+docker start debian-xfce
 ```
 
-Para incluir contenedores detenidos:
+---
+
+# Eliminar el contenedor
 
 ```bash
-docker ps -a --filter name=debian-xfce-rdp
+docker rm -f debian-xfce
 ```
 
 ---
 
 # Ver logs
 
-Logs principales del contenedor:
-
 ```bash
-docker logs debian-xfce-rdp
+docker logs debian-xfce
 ```
 
-Últimas 50 líneas:
+Últimas líneas:
 
 ```bash
-docker logs --tail 50 debian-xfce-rdp
+docker logs --tail 50 debian-xfce
 ```
 
 ---
 
 # Diagnóstico de audio
 
-Con una sesión RDP abierta puedes comprobar los procesos:
+Con una sesión XRDP abierta:
 
 ```bash
-docker exec debian-xfce-rdp sh -lc '
+docker exec debian-xfce sh -lc '
 ps -ef | grep -E "[p]ipewire|[w]ireplumber|[x]rdp-chansrv"
 '
 ```
 
-Deberían existir procesos similares a:
+Se espera encontrar:
 
 ```text
 pipewire
@@ -683,15 +848,17 @@ pipewire-pulse
 xrdp-chansrv
 ```
 
-Para comprobar el servidor de audio:
+---
+
+# Comprobar PipeWire
 
 ```bash
-docker exec debian-xfce-rdp sh -lc '
+docker exec debian-xfce sh -lc '
 su - debian -c "XDG_RUNTIME_DIR=/run/user/\$(id -u) pactl info"
 '
 ```
 
-La salida debería indicar algo similar a:
+Una sesión correcta debería mostrar algo similar a:
 
 ```text
 Server Name: PulseAudio (on PipeWire 1.4.2)
@@ -699,15 +866,17 @@ Default Sink: xrdp-sink
 Default Source: xrdp-source
 ```
 
-Puedes comprobar los sinks con:
+---
+
+# Comprobar sinks
 
 ```bash
-docker exec debian-xfce-rdp sh -lc '
+docker exec debian-xfce sh -lc '
 su - debian -c "XDG_RUNTIME_DIR=/run/user/\$(id -u) pactl list short sinks"
 '
 ```
 
-Debería aparecer:
+Debe aparecer:
 
 ```text
 xrdp-sink
@@ -715,118 +884,59 @@ xrdp-sink
 
 ---
 
-# Puerto 3389 ocupado
+# Comprobar Brave
 
-Si aparece un error parecido a:
+Abre Brave desde XFCE.
+
+Después visita:
+
+```text
+brave://sandbox
+```
+
+Debe mostrar activos al menos:
+
+```text
+Namespace Sandbox
+PID namespaces
+Network namespaces
+Seccomp-BPF
+TSYNC
+```
+
+y al final:
+
+```text
+You are adequately sandboxed.
+```
+
+---
+
+# Puerto ocupado
+
+Si Docker devuelve:
 
 ```text
 Bind for 127.0.0.1:3389 failed: port is already allocated
 ```
 
-algún otro proceso o contenedor ya está utilizando el puerto.
-
-Comprueba Docker:
+comprueba:
 
 ```bash
 docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Ports}}' | grep 3389
 ```
 
-También puedes comprobar el host:
+También:
 
 ```bash
 ss -ltnp | grep ':3389'
 ```
 
-Detén el servicio o contenedor que esté utilizando el puerto antes de iniciar `debian-xfce-rdp`.
+Utiliza otro puerto del host o detén el proceso que esté ocupándolo.
 
 ---
 
-# Crear una instancia de prueba en otro puerto
-
-Para hacer pruebas sin interferir con otro escritorio RDP puedes utilizar otro puerto del host.
-
-Por ejemplo:
-
-```bash
-docker run -d \
-    --name debian-xfce-test \
-    --shm-size=1g \
-    -p 127.0.0.1:3390:3389 \
-    -e RDP_PASSWORD='debian' \
-    debian-xfce:latest
-```
-
-Después conecta mediante:
-
-```bash
-xfreerdp3 \
-    /v:127.0.0.1:3390 \
-    /u:debian \
-    /p:debian \
-    /cert:ignore \
-    /dynamic-resolution \
-    /clipboard \
-    /sound
-```
-
----
-
-# Eliminar el contenedor
-
-```bash
-docker rm -f debian-xfce-rdp
-```
-
-Esto elimina el contenedor, pero no la imagen.
-
----
-
-# Eliminar la imagen
-
-Primero elimina cualquier contenedor que la esté utilizando.
-
-Después:
-
-```bash
-docker image rm debian-xfce:latest
-```
-
----
-
-# Reconstruir después de actualizar
-
-Actualiza el repositorio:
-
-```bash
-git pull
-```
-
-Reconstruye:
-
-```bash
-docker build --no-cache -t debian-xfce:latest .
-```
-
-Si quieres recrear completamente el contenedor:
-
-```bash
-docker rm -f debian-xfce-rdp
-```
-
-y luego:
-
-```bash
-docker create \
-    --name debian-xfce-rdp \
-    --shm-size=1g \
-    -p 127.0.0.1:3389:3389 \
-    -e RDP_PASSWORD='TU_CONTRASEÑA' \
-    debian-xfce:latest
-```
-
----
-
-# Archivos principales
+# Archivos del proyecto
 
 ```text
 debian-xfce-docker/
@@ -838,34 +948,51 @@ debian-xfce-docker/
     └── debian-xfce
 ```
 
-## `Dockerfile`
+---
 
-Construye:
+# Dockerfile
 
-* Debian 13
-* XFCE
-* XRDP
-* xorgxrdp
-* H.264/x264
-* PipeWire
-* integración XRDP de audio
-* Brave Browser
+El `Dockerfile` construye:
 
-## `start.sh`
+```text
+Debian 13
+XFCE
+XRDP 0.10.6.1
+xorgxrdp 0.10.5
+H.264/x264
+PipeWire
+WirePlumber
+pipewire-module-xrdp
+Brave Browser
+usuario debian
+password 1234
+```
 
-Es el proceso de entrada del contenedor.
+---
 
-Se encarga de:
+# start.sh
 
-* configurar la contraseña RDP
-* preparar `/run/xrdp`
-* preparar `/run/user/<UID>`
-* iniciar `xrdp-sesman`
-* iniciar XRDP
+Se ejecuta como proceso inicial del contenedor.
 
-## `start-xfce-xrdp`
+Prepara:
 
-Se ejecuta dentro de la sesión del usuario.
+```text
+/run/xrdp
+/run/user/<UID>
+```
+
+y después inicia:
+
+```text
+xrdp-sesman
+xrdp
+```
+
+---
+
+# start-xfce-xrdp
+
+Se ejecuta dentro de la sesión gráfica del usuario.
 
 Inicia:
 
@@ -876,142 +1003,228 @@ pipewire-pulse
 XFCE
 ```
 
-y limpia los procesos de audio cuando la sesión termina.
-
-## `scripts/debian-xfce`
-
-Launcher ejecutado en el host.
-
-Se encarga del ciclo completo de apertura del escritorio.
+Después limpia los procesos cuando termina la sesión.
 
 ---
 
-# Flujo de arranque
+# scripts/debian-xfce
 
-```text
-debian-xfce
-     │
-     ▼
-Docker container
-     │
-     ▼
-start.sh
-     │
-     ├── /run/xrdp
-     ├── /run/user/1000
-     ├── xrdp-sesman
-     └── xrdp
-            │
-            ▼
-       Login RDP
-            │
-            ▼
-       .xsession
-            │
-            ▼
-     dbus-run-session
-            │
-            ▼
-    start-xfce-xrdp
-            │
-            ├── PipeWire
-            ├── WirePlumber
-            ├── pipewire-pulse
-            └── XFCE
-                    │
-                    ▼
-            pipewire-module-xrdp
-                    │
-                    ▼
-              xrdp-sink
-                    │
-                    ▼
-                 /sound
-                    │
-                    ▼
-                 Host
-```
+Este launcher pertenece al desarrollo standalone original del proyecto.
+
+Puede utilizarse para pruebas manuales, pero **no es la arquitectura final prevista para Linux Desktop Containers**.
+
+El administrador principal dispondrá de su propio launcher genérico y configuración específica por distribución/escritorio.
 
 ---
 
-# Rendimiento
+# Integración futura con Linux Desktop Containers
 
-Esta versión debe considerarse el modo **Standard** del proyecto.
-
-Actualmente utiliza:
+Cuando esta imagen se integre en el proyecto principal, el flujo esperado será:
 
 ```text
-XRDP
-xorgxrdp
-H.264
-x264 por CPU
-60 Hz
+linux-desktops
+       │
+       ▼
+Debian
+       │
+       ▼
 XFCE
+       │
+       ▼
+Instalar
+       │
+       ▼
+GHCR
+       │
+       ▼
+docker pull
+       │
+       ▼
+docker create
+       │
+       ├── localhost
+       ├── puerto automático
+       ├── shm 1g
+       ├── seccomp Brave
+       └── seguridad del host
+       │
+       ▼
+Acceso directo
+       │
+       ▼
+FreeRDP
+       │
+       ▼
+Debian XFCE
 ```
-
-No utiliza todavía una ruta completa de GPU dentro del contenedor.
-
-Opciones como:
-
-* `/dev/dri/renderD*`
-* VA-API
-* codificación H.264 mediante hardware
-* GPU passthrough parcial
-* Sunshine + Moonlight
-* Xpra
-* Waypipe
-
-pertenecen a experimentos futuros de rendimiento y no forman parte de la configuración Standard actual.
-
-El objetivo del modo Standard es mantener:
-
-* bajo consumo
-* buena compatibilidad
-* estabilidad
-* facilidad de instalación
-* buena fluidez sin convertir el contenedor en una VM pesada
 
 ---
 
-# Seguridad
+# GitHub Container Registry
 
-El puerto XRDP se limita por defecto a:
-
-```text
-127.0.0.1
-```
-
-para evitar exposición directa a la red.
-
-No se recomienda publicar el puerto:
+La imagen final del proyecto principal está pensada para publicarse mediante:
 
 ```text
-0.0.0.0:3389
+GitHub Container Registry
 ```
 
-sin implementar medidas adicionales de seguridad.
+o:
 
-También se recomienda utilizar una contraseña RDP fuerte.
+```text
+GHCR
+```
 
-> [!WARNING]
-> Brave todavía utiliza `--no-sandbox` en esta versión.
->
-> Esta parte se encuentra pendiente de migración hacia una configuración con sandbox real.
+El formato esperado será:
+
+```text
+ghcr.io/fartavia3210-design/linux-desktop-containers/debian-xfce:latest
+```
+
+Esto permitirá que el usuario final no tenga que compilar XRDP ni construir la imagen localmente.
+
+El administrador simplemente podrá descargarla mediante:
+
+```text
+docker pull
+```
 
 ---
 
-# Proyecto
+# Seguridad por host
 
-Repositorio:
+La imagen no debe encargarse por sí sola de modificar la seguridad global del host.
+
+El proyecto principal Linux Desktop Containers se encargará de manejar:
 
 ```text
-https://github.com/fartavia3210-design/debian-xfce-docker
+seccomp
+AppArmor
+SELinux
 ```
 
-Proyecto relacionado:
+según corresponda.
+
+El perfil seccomp de Brave es independiente de las políticas específicas de SELinux/AppArmor.
+
+No utilizar:
+
+```text
+--privileged
+```
+
+No utilizar:
+
+```text
+seccomp=unconfined
+```
+
+No desactivar SELinux globalmente.
+
+---
+
+# Modo Standard
+
+Esta configuración representa el futuro:
+
+```text
+Debian XFCE — Standard
+```
+
+Prioridades:
+
+* estabilidad;
+* compatibilidad;
+* bajo consumo;
+* buena fluidez;
+* seguridad;
+* facilidad de mantenimiento;
+* funcionamiento en varios hosts Linux.
+
+---
+
+# Futuro modo Performance
+
+Después de terminar e integrar el modo Standard se podrán experimentar opciones como:
+
+```text
+/dev/dri/renderD*
+Mesa
+VA-API
+GPU real
+H.264 por hardware
+Xpra
+Waypipe
+Sunshine + Moonlight
+```
+
+Pero estas mejoras deberán mantenerse separadas del modo Standard.
+
+El objetivo será comparar:
+
+* RAM;
+* CPU en reposo;
+* CPU moviendo ventanas;
+* reproducción de video;
+* latencia;
+* scrolling;
+* frame pacing;
+* uso de GPU;
+* tiempo de arranque;
+* complejidad;
+* compatibilidad;
+* seguridad.
+
+La meta es mejorar notablemente la fluidez **sin convertir el proyecto en una máquina virtual pesada**.
+
+---
+
+# Principios del proyecto
+
+1. No romper una distribución para arreglar otra.
+2. Mantener configuraciones específicas por distro/escritorio cuando sea necesario.
+3. No desactivar seguridad globalmente.
+4. Mantener `/dev/shm` adecuado.
+5. Utilizar sandbox real en Brave.
+6. Mantener el modo Standard estable.
+7. Probar cambios antes de integrarlos al administrador principal.
+8. Mantener Docker ligero frente a una VM tradicional.
+9. Diseñar el proyecto para poder crecer a múltiples distribuciones.
+10. Mantener abierta la posibilidad de un futuro modo remoto seguro.
+
+---
+
+# Estado de Debian XFCE Standard
+
+```text
+Debian 13                         ✅
+XFCE                              ✅
+Xorg                              ✅
+XRDP 0.10.6.1                     ✅
+xorgxrdp 0.10.5                   ✅
+H.264 / x264                      ✅
+60 Hz                             ✅
+Audio PipeWire                    ✅
+xrdp-sink                         ✅
+xrdp-source                       ✅
+Clipboard                         ✅
+Usuario debian                    ✅
+Password interno 1234             ✅
+RDP_PASSWORD externo eliminado    ✅
+Brave instalado                   ✅
+Brave sin --no-sandbox            ✅
+Namespace Sandbox                 ✅
+PID namespaces                    ✅
+Network namespaces                ✅
+Seccomp-BPF                       ✅
+TSYNC                             ✅
+You are adequately sandboxed      ✅
+shm 1 GB                          ✅
+```
+
+La siguiente etapa del proyecto es integrar esta imagen en:
 
 ```text
 Linux Desktop Containers
 ```
 
-El objetivo general es investigar y desarrollar escritorios Linux completos, ligeros y reutilizables ejecutándose dentro de contenedores Docker.
+manteniendo intacta la configuración estable existente de Arch XFCE.
