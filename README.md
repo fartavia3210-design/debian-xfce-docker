@@ -1,34 +1,42 @@
 # Debian XFCE Docker
 
-A lightweight Debian 13 desktop environment running inside a Docker container, with XFCE, XRDP, H.264/x264 encoding, 60 Hz virtual display support, clipboard integration, and Brave Browser.
+Escritorio **Debian 13 + XFCE** ejecutándose dentro de un contenedor Docker y accesible mediante **XRDP + FreeRDP 3**.
 
-This project provides a desktop-like Linux environment without running a full virtual machine.
+El proyecto permite tener un escritorio Linux completo y aislado sin necesidad de ejecutar una máquina virtual pesada.
 
-## Features
+Incluye soporte para:
 
-- Debian 13
-- XFCE 4 desktop environment
-- XRDP 0.10.6.1
-- xorgxrdp 0.10.5
-- H.264 desktop encoding using x264
-- RFX fallback support
-- 60 Hz virtual RDP display
-- Bidirectional clipboard
-- Brave Browser preinstalled
-- Automatic XFCE session startup
-- Automatic Docker container launcher
-- SDL-FreeRDP / FreeRDP 3 support
-- Automatic window sizing
-- Local per-user window size configuration
-- RDP exposed only on `127.0.0.1` by default
+* XFCE 4
+* XRDP 0.10.6.1
+* xorgxrdp 0.10.5
+* H.264 mediante x264
+* RFX como fallback
+* pantalla virtual a 60 Hz
+* audio mediante PipeWire + XRDP
+* portapapeles bidireccional
+* resolución y tamaño de ventana automáticos
+* Brave Browser
+* launcher automático
+* SDL-FreeRDP 3
+* XFreeRDP 3 como alternativa
+* `/dev/shm` ampliado a 1 GB
 
-## How it works
+---
 
-This is **not a virtual machine**.
+# Arquitectura
 
-The Debian container shares the Linux kernel of the host system while running its own userspace, desktop environment, applications, and graphical session.
+Este proyecto **no es una máquina virtual**.
 
-The desktop is rendered by Xorg through xorgxrdp and transmitted to the host using the RDP Graphics Pipeline.
+Docker comparte el kernel Linux del host mientras Debian ejecuta su propio:
+
+* userspace
+* escritorio
+* aplicaciones
+* servidor gráfico
+* sesión XRDP
+* stack de audio
+
+La arquitectura general es:
 
 ```text
 Linux Host
@@ -43,505 +51,967 @@ Debian 13 Container
     │
     ├── Xorg
     │
-    └── xorgxrdp
-            │
-            ▼
-        XRDP 0.10.6.1
-            │
-            ▼
-      H.264 / x264
-            │
-            ▼
-     FreeRDP 3 Client
-            │
-            ▼
-      Desktop Window
+    ├── xorgxrdp
+    │
+    ├── PipeWire
+    │
+    ├── WirePlumber
+    │
+    └── XRDP
+    │
+    ▼
+FreeRDP 3
+    │
+    ▼
+Desktop Window
 ```
 
-XRDP prefers H.264 and falls back to RFX when H.264 cannot be negotiated.
+---
 
-The codec configuration is:
+# Características
 
-```toml
-[codec]
-order = [ "H.264", "RFX" ]
+## Debian 13
 
-h264_encoder = "x264"
+La imagen utiliza:
+
+```text
+debian:13
 ```
 
-The x264 encoder is configured for low-latency desktop use:
+como base.
 
-```toml
-preset = "ultrafast"
-tune = "zerolatency"
-fps_num = 60
-fps_den = 1
+---
+
+## XFCE
+
+El entorno de escritorio utilizado es **XFCE**, elegido por su bajo consumo de recursos y buen funcionamiento dentro de contenedores.
+
+Se incluyen, entre otros:
+
+```text
+xfce4
+xfce4-terminal
+dbus-x11
+xserver-xorg-core
 ```
 
-## 60 Hz support
+---
 
-xorgxrdp normally creates its virtual display using a 50 Hz pseudo refresh rate.
+# XRDP
 
-During the Docker build, this project patches xorgxrdp before compilation:
+El proyecto no utiliza simplemente la versión de XRDP incluida por defecto en Debian.
+
+Durante el build se compilan desde código fuente:
+
+```text
+XRDP:      0.10.6.1
+xorgxrdp:  0.10.5
+```
+
+XRDP se construye con soporte para:
+
+* PAM
+* IPv6
+* JPEG
+* FUSE
+* Opus
+* Pixman
+* H.264/x264
+
+---
+
+# H.264 / x264
+
+XRDP utiliza su Graphics Pipeline con soporte para H.264.
+
+La configuración está orientada a escritorio remoto de baja latencia.
+
+El encoder utilizado actualmente es:
+
+```text
+x264
+```
+
+Por tanto, la codificación H.264 se realiza actualmente mediante **CPU/software**.
+
+La configuración está orientada a:
+
+```text
+preset: ultrafast
+tune: zerolatency
+objetivo: 60 FPS
+```
+
+Si H.264 no puede negociarse, XRDP puede utilizar **RFX como fallback**.
+
+---
+
+# 60 Hz
+
+Durante la compilación de xorgxrdp se modifica su frecuencia virtual:
+
+```c
+const int vfreq = 50;
+```
+
+por:
 
 ```c
 const int vfreq = 60;
 ```
 
-The resulting RDP display reports:
+Esto permite que la sesión RDP pueda reportar una pantalla virtual cercana a:
 
 ```text
-1900x1026     60.00*
+60.00 Hz
 ```
 
-Resolution itself is determined by the RDP client and can be changed depending on the host display.
+La resolución real depende del tamaño solicitado por el cliente FreeRDP.
 
-## Requirements
+---
 
-A Linux host with:
+# Audio
 
-- Docker
-- Git
-- FreeRDP 3
+El proyecto utiliza **PipeWire** para transportar el audio generado dentro del contenedor hacia el host mediante XRDP.
 
-Recommended RDP client:
+Stack utilizado:
+
+```text
+pipewire
+pipewire-pulse
+wireplumber
+pipewire-module-xrdp
+pulseaudio-utils
+```
+
+El antiguo servidor PulseAudio no se utiliza como servidor principal.
+
+La arquitectura de audio es:
+
+```text
+Aplicación dentro de Debian
+        │
+        ▼
+pipewire-pulse
+        │
+        ▼
+PipeWire
+        │
+        ▼
+pipewire-module-xrdp
+        │
+        ├── xrdp-sink
+        └── xrdp-source
+        │
+        ▼
+xrdp-chansrv
+        │
+        ▼
+RDP Audio
+        │
+        ▼
+FreeRDP /sound
+        │
+        ▼
+Audio del host
+```
+
+La sesión XFCE inicia automáticamente:
+
+```text
+PipeWire
+WirePlumber
+pipewire-pulse
+XFCE
+```
+
+El módulo `pipewire-module-xrdp` se carga dentro de la sesión gráfica y crea:
+
+```text
+xrdp-sink
+xrdp-source
+```
+
+El launcher activa el audio de FreeRDP mediante:
+
+```text
+/sound
+```
+
+---
+
+# Portapapeles
+
+El launcher activa integración de portapapeles mediante FreeRDP:
+
+```text
++clipboard
+```
+
+Esto permite copiar y pegar entre:
+
+```text
+Host ↔ Debian XFCE
+```
+
+---
+
+# Brave Browser
+
+Brave Browser se instala automáticamente durante el build.
+
+> [!WARNING]
+> Actualmente esta versión del proyecto todavía inicia Brave utilizando `--no-sandbox`.
+>
+> Esta configuración está pendiente de ser sustituida por una implementación con sandbox real antes de considerar la parte de seguridad completamente terminada.
+
+---
+
+# `/dev/shm`
+
+Se recomienda crear el contenedor con:
+
+```text
+--shm-size=1g
+```
+
+No se recomienda utilizar el valor predeterminado pequeño de Docker, especialmente para navegadores basados en Chromium como Brave.
+
+---
+
+# Requisitos
+
+El host debe utilizar Linux y disponer de:
+
+* Docker
+* Git
+* FreeRDP 3
+
+El launcher soporta:
 
 ```text
 sdl-freerdp3
 ```
 
-The launcher can also fall back to:
+y como alternativa:
 
 ```text
 xfreerdp3
 ```
 
-when SDL-FreeRDP is not available.
+Actualmente el launcher prefiere SDL-FreeRDP cuando ambos están disponibles.
 
-### Arch / CachyOS
+---
 
-Install Docker and FreeRDP using the distribution repositories.
+# Instalación en Arch Linux / CachyOS
 
-For example:
+Instala las dependencias:
 
 ```bash
-sudo pacman -S docker freerdp
+sudo pacman -S docker freerdp git
 ```
 
-Enable and start Docker if necessary:
+Activa Docker:
 
 ```bash
 sudo systemctl enable --now docker
 ```
 
-Your user must also have permission to access Docker.
+Agrega tu usuario al grupo Docker:
 
-## Clone
+```bash
+sudo usermod -aG docker "$USER"
+```
+
+Después debes **cerrar sesión y volver a entrar**, o reiniciar el equipo, para que el nuevo grupo tenga efecto.
+
+Comprueba:
+
+```bash
+docker info
+```
+
+Si funciona sin `sudo`, Docker está listo.
+
+---
+
+# Clonar el repositorio
 
 ```bash
 git clone https://github.com/fartavia3210-design/debian-xfce-docker.git
+```
+
+Entra al proyecto:
+
+```bash
 cd debian-xfce-docker
 ```
 
-## Build
+---
 
-Build the Docker image:
+# Construir la imagen
+
+Construye la imagen:
 
 ```bash
-docker build -t debian-xfce:2.0.0 .
+docker build -t debian-xfce:latest .
 ```
 
-XRDP and xorgxrdp are compiled from source during the image build, so the first build may take several minutes.
+La primera compilación puede tardar varios minutos porque XRDP y xorgxrdp se compilan desde código fuente.
 
-The versions currently used are:
+Comprueba que exista:
+
+```bash
+docker images | grep debian-xfce
+```
+
+Deberías ver algo parecido a:
 
 ```text
-XRDP:     0.10.6.1
-xorgxrdp: 0.10.5
+debian-xfce   latest
 ```
 
-## Create the container
+---
 
-Create the desktop container:
+# Crear el contenedor
+
+Crea el contenedor con:
 
 ```bash
 docker create \
     --name debian-xfce-rdp \
     --shm-size=1g \
     -p 127.0.0.1:3389:3389 \
-    -e RDP_PASSWORD='CHANGE_THIS_PASSWORD' \
-    debian-xfce:2.0.0
+    -e RDP_PASSWORD='TU_CONTRASEÑA' \
+    debian-xfce:latest
 ```
 
-Replace:
+Cambia:
 
 ```text
-CHANGE_THIS_PASSWORD
+TU_CONTRASEÑA
 ```
 
-with the password you want to use for the Debian RDP session.
+por la contraseña que quieras utilizar.
 
-The internal desktop user is:
+Por ejemplo:
+
+```bash
+docker create \
+    --name debian-xfce-rdp \
+    --shm-size=1g \
+    -p 127.0.0.1:3389:3389 \
+    -e RDP_PASSWORD='debian123' \
+    debian-xfce:latest
+```
+
+El usuario interno del escritorio es:
 
 ```text
 debian
 ```
 
-### Why bind to 127.0.0.1?
+---
 
-The container publishes RDP as:
+# ¿Por qué `127.0.0.1`?
+
+El puerto se publica como:
 
 ```text
 127.0.0.1:3389
 ```
 
-instead of:
+en lugar de:
 
 ```text
 0.0.0.0:3389
 ```
 
-This prevents the RDP service from being directly exposed to other devices on the network by default.
+De esta forma XRDP solamente queda accesible desde el mismo host y no se expone directamente a otros dispositivos de la red.
 
-## Manual start
+---
 
-Start the container:
+# Instalar el launcher
 
-```bash
-docker start debian-xfce-rdp
-```
-
-Check its status:
-
-```bash
-docker ps --filter name=debian-xfce-rdp
-```
-
-The RDP service will be available at:
-
-```text
-127.0.0.1:3389
-```
-
-Stop it with:
-
-```bash
-docker stop debian-xfce-rdp
-```
-
-## Automatic launcher
-
-The repository includes:
+El repositorio incluye:
 
 ```text
 scripts/debian-xfce
 ```
 
-The launcher automatically:
-
-1. Checks whether the container exists.
-2. Starts it if necessary.
-3. Waits for XRDP to become ready.
-4. Reads the RDP username and password from the container configuration.
-5. Detects the current monitor size.
-6. Opens SDL-FreeRDP or XFreeRDP.
-7. Enables clipboard integration.
-8. Stops the container when the RDP window closes, if the launcher started it.
-
-Install it locally:
-
-```bash
-mkdir -p ~/.local/bin
-
-cp scripts/debian-xfce ~/.local/bin/debian-xfce
-
-chmod +x ~/.local/bin/debian-xfce
-```
-
-Then run:
-
-```bash
-debian-xfce
-```
-
-Make sure:
+Cópialo a:
 
 ```text
 ~/.local/bin
 ```
 
-is included in your `PATH`.
+con:
 
-## Window size configuration
-
-The launcher calculates the initial RDP resolution based on the current monitor.
-
-Default values are:
-
-```text
-WINDOW_PERCENT_W=90
-WINDOW_PERCENT_H=90
+```bash
+mkdir -p ~/.local/bin
+cp scripts/debian-xfce ~/.local/bin/debian-xfce
+chmod +x ~/.local/bin/debian-xfce
 ```
 
-You can override them without modifying the repository.
+Comprueba:
 
-Create:
+```bash
+command -v debian-xfce
+```
+
+Si devuelve:
+
+```text
+/home/TU_USUARIO/.local/bin/debian-xfce
+```
+
+ya está listo.
+
+---
+
+# Abrir Debian XFCE
+
+Una vez construida la imagen, creado el contenedor e instalado el launcher, simplemente ejecuta:
+
+```bash
+debian-xfce
+```
+
+El launcher automáticamente:
+
+1. Comprueba que Docker esté instalado.
+2. Comprueba que exista `debian-xfce-rdp`.
+3. Detecta SDL-FreeRDP 3 o XFreeRDP 3.
+4. Arranca el contenedor si estaba detenido.
+5. Espera a que XRDP y `xrdp-sesman` estén preparados.
+6. Lee las credenciales RDP desde la configuración del contenedor.
+7. Detecta el tamaño del monitor.
+8. Calcula el tamaño inicial de la ventana.
+9. Abre Debian XFCE mediante FreeRDP.
+10. Activa portapapeles.
+11. Activa audio.
+12. Detiene el contenedor al cerrar la ventana si fue el launcher quien lo inició.
+
+---
+
+# Tamaño automático de la ventana
+
+Por defecto el launcher utiliza aproximadamente:
+
+```text
+90 % del ancho
+90 % del alto
+```
+
+del monitor.
+
+En Hyprland utiliza:
+
+```text
+hyprctl
+```
+
+para detectar el monitor activo.
+
+En escritorios X11 utiliza:
+
+```text
+xrandr
+```
+
+como fallback.
+
+Si ninguno está disponible utiliza:
+
+```text
+1920x1080
+```
+
+como último fallback.
+
+---
+
+# Configurar el tamaño de la ventana
+
+Puedes crear:
 
 ```text
 ~/.config/debian-xfce-docker/config
 ```
 
-Example:
+Por ejemplo:
 
 ```bash
-WINDOW_PERCENT_W=99
+mkdir -p ~/.config/debian-xfce-docker
+nano ~/.config/debian-xfce-docker/config
+```
+
+Y configurar:
+
+```bash
+WINDOW_PERCENT_W=85
+WINDOW_PERCENT_H=85
+```
+
+Por ejemplo, para utilizar casi toda la pantalla:
+
+```bash
+WINDOW_PERCENT_W=95
 WINDOW_PERCENT_H=95
 ```
 
-This configuration remains local to the machine and does not need to be committed to Git.
+---
 
-## Display detection
+# Abrir manualmente sin launcher
 
-The launcher currently has specialized detection for Hyprland using:
+También puedes iniciar todo manualmente.
 
-```text
-hyprctl monitors
-```
-
-It also includes an X11 fallback using:
-
-```text
-xrandr
-```
-
-The project has been primarily tested on a Linux + Hyprland host.
-
-Other desktop environments such as KDE Plasma or GNOME may work with FreeRDP, but automatic monitor-size detection may require additional testing or adjustments.
-
-## Verify 60 Hz
-
-Inside the Debian XFCE session run:
+Primero arranca el contenedor:
 
 ```bash
-xrandr
+docker start debian-xfce-rdp
 ```
 
-A successful 60 Hz session should show something similar to:
-
-```text
-Screen 0: minimum 256 x 256, current 1900 x 1026, maximum 16384 x 16384
-rdp0 connected 1900x1026+0+0
-   1900x1026     60.00*
-```
-
-The exact resolution depends on the RDP client window size.
-
-## Verify H.264
-
-Check the XRDP log:
+Comprueba:
 
 ```bash
-docker exec debian-xfce-rdp \
-    sh -c "grep -Ei 'h264|x264|rfx|gfx|encoder' /var/log/xrdp.log | tail -n 80"
+docker ps --filter name=debian-xfce-rdp
 ```
 
-When H.264 is successfully negotiated, the output should include messages similar to:
-
-```text
-Codec search order is H264, RFX
-Matched H264 mode
-xrdp_encoder_create: starting h264 codec session gfx
-xrdp_encoder_create: using x264 for software encoder
-xrdp_encoder_x264_encode: x264_encoder_open
-```
-
-This confirms that the session is actually using H.264/x264 rather than the RFX fallback.
-
-## Verify XRDP build
-
-Run:
+Después conecta con XFreeRDP:
 
 ```bash
-docker run --rm \
-    --entrypoint /usr/sbin/xrdp \
-    debian-xfce:2.0.0 \
-    --version
+xfreerdp3 \
+    /v:127.0.0.1:3389 \
+    /u:debian \
+    /p:'TU_CONTRASEÑA' \
+    /cert:ignore \
+    /dynamic-resolution \
+    /clipboard \
+    /sound
 ```
 
-The configure options should include:
+O con SDL-FreeRDP:
+
+```bash
+sdl-freerdp3 \
+    /v:127.0.0.1:3389 \
+    /u:debian \
+    /p:'TU_CONTRASEÑA' \
+    /cert:ignore \
+    /dynamic-resolution \
+    /clipboard \
+    /sound
+```
+
+---
+
+# Detener Debian XFCE
+
+Si utilizaste el launcher y fue el launcher quien arrancó el contenedor, este lo detendrá automáticamente cuando cierres FreeRDP.
+
+También puedes detenerlo manualmente:
+
+```bash
+docker stop debian-xfce-rdp
+```
+
+---
+
+# Volver a abrirlo
+
+No necesitas reconstruir la imagen cada vez.
+
+Simplemente ejecuta:
+
+```bash
+debian-xfce
+```
+
+El contenedor existente será reutilizado.
+
+---
+
+# Estado del contenedor
+
+Verifica si está ejecutándose:
+
+```bash
+docker ps --filter name=debian-xfce-rdp
+```
+
+Para incluir contenedores detenidos:
+
+```bash
+docker ps -a --filter name=debian-xfce-rdp
+```
+
+---
+
+# Ver logs
+
+Logs principales del contenedor:
+
+```bash
+docker logs debian-xfce-rdp
+```
+
+Últimas 50 líneas:
+
+```bash
+docker logs --tail 50 debian-xfce-rdp
+```
+
+---
+
+# Diagnóstico de audio
+
+Con una sesión RDP abierta puedes comprobar los procesos:
+
+```bash
+docker exec debian-xfce-rdp sh -lc '
+ps -ef | grep -E "[p]ipewire|[w]ireplumber|[x]rdp-chansrv"
+'
+```
+
+Deberían existir procesos similares a:
 
 ```text
---enable-x264
+pipewire
+wireplumber
+pipewire-pulse
+xrdp-chansrv
 ```
 
-## Brave Browser
+Para comprobar el servidor de audio:
 
-Brave Browser is preinstalled.
+```bash
+docker exec debian-xfce-rdp sh -lc '
+su - debian -c "XDG_RUNTIME_DIR=/run/user/\$(id -u) pactl info"
+'
+```
 
-Inside this Docker environment Chromium's normal sandbox cannot initialize using the default container restrictions.
-
-For this reason, the desktop launcher entries start Brave with:
+La salida debería indicar algo similar a:
 
 ```text
---no-sandbox
+Server Name: PulseAudio (on PipeWire 1.4.2)
+Default Sink: xrdp-sink
+Default Source: xrdp-source
 ```
 
-This is convenient for this isolated desktop container, but it reduces the browser's own process sandboxing.
+Puedes comprobar los sinks con:
 
-If stronger browser isolation is required, the container security model should be adjusted instead of relying on `--no-sandbox`.
+```bash
+docker exec debian-xfce-rdp sh -lc '
+su - debian -c "XDG_RUNTIME_DIR=/run/user/\$(id -u) pactl list short sinks"
+'
+```
 
-## Clipboard
-
-RDP clipboard integration is enabled by the launcher:
+Debería aparecer:
 
 ```text
-+clipboard
+xrdp-sink
 ```
 
-Text can be copied between the host and Debian desktop in both directions.
+---
 
-## Project structure
+# Puerto 3389 ocupado
+
+Si aparece un error parecido a:
+
+```text
+Bind for 127.0.0.1:3389 failed: port is already allocated
+```
+
+algún otro proceso o contenedor ya está utilizando el puerto.
+
+Comprueba Docker:
+
+```bash
+docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Ports}}' | grep 3389
+```
+
+También puedes comprobar el host:
+
+```bash
+ss -ltnp | grep ':3389'
+```
+
+Detén el servicio o contenedor que esté utilizando el puerto antes de iniciar `debian-xfce-rdp`.
+
+---
+
+# Crear una instancia de prueba en otro puerto
+
+Para hacer pruebas sin interferir con otro escritorio RDP puedes utilizar otro puerto del host.
+
+Por ejemplo:
+
+```bash
+docker run -d \
+    --name debian-xfce-test \
+    --shm-size=1g \
+    -p 127.0.0.1:3390:3389 \
+    -e RDP_PASSWORD='debian' \
+    debian-xfce:latest
+```
+
+Después conecta mediante:
+
+```bash
+xfreerdp3 \
+    /v:127.0.0.1:3390 \
+    /u:debian \
+    /p:debian \
+    /cert:ignore \
+    /dynamic-resolution \
+    /clipboard \
+    /sound
+```
+
+---
+
+# Eliminar el contenedor
+
+```bash
+docker rm -f debian-xfce-rdp
+```
+
+Esto elimina el contenedor, pero no la imagen.
+
+---
+
+# Eliminar la imagen
+
+Primero elimina cualquier contenedor que la esté utilizando.
+
+Después:
+
+```bash
+docker image rm debian-xfce:latest
+```
+
+---
+
+# Reconstruir después de actualizar
+
+Actualiza el repositorio:
+
+```bash
+git pull
+```
+
+Reconstruye:
+
+```bash
+docker build --no-cache -t debian-xfce:latest .
+```
+
+Si quieres recrear completamente el contenedor:
+
+```bash
+docker rm -f debian-xfce-rdp
+```
+
+y luego:
+
+```bash
+docker create \
+    --name debian-xfce-rdp \
+    --shm-size=1g \
+    -p 127.0.0.1:3389:3389 \
+    -e RDP_PASSWORD='TU_CONTRASEÑA' \
+    debian-xfce:latest
+```
+
+---
+
+# Archivos principales
 
 ```text
 debian-xfce-docker/
 ├── Dockerfile
 ├── README.md
 ├── start.sh
+├── start-xfce-xrdp
 └── scripts/
     └── debian-xfce
 ```
 
-### Dockerfile
+## `Dockerfile`
 
-Builds:
+Construye:
 
-- Debian 13
-- XFCE
-- XRDP
-- xorgxrdp
-- x264 support
-- Brave Browser
-- Debian desktop user
-- 60 Hz xorgxrdp patch
+* Debian 13
+* XFCE
+* XRDP
+* xorgxrdp
+* H.264/x264
+* PipeWire
+* integración XRDP de audio
+* Brave Browser
 
-### start.sh
+## `start.sh`
 
-Starts the XRDP services inside the container and configures the RDP user's password.
+Es el proceso de entrada del contenedor.
 
-### scripts/debian-xfce
+Se encarga de:
 
-Host-side launcher responsible for managing the container and opening the FreeRDP client.
+* configurar la contraseña RDP
+* preparar `/run/xrdp`
+* preparar `/run/user/<UID>`
+* iniciar `xrdp-sesman`
+* iniciar XRDP
 
-## Useful commands
+## `start-xfce-xrdp`
 
-Container status:
+Se ejecuta dentro de la sesión del usuario.
 
-```bash
-docker ps -a --filter name=debian-xfce-rdp
-```
-
-Start:
-
-```bash
-docker start debian-xfce-rdp
-```
-
-Stop:
-
-```bash
-docker stop debian-xfce-rdp
-```
-
-Container logs:
-
-```bash
-docker logs debian-xfce-rdp
-```
-
-XRDP log:
-
-```bash
-docker exec debian-xfce-rdp tail -n 100 /var/log/xrdp.log
-```
-
-XRDP session manager log:
-
-```bash
-docker exec debian-xfce-rdp tail -n 100 /var/log/xrdp-sesman.log
-```
-
-Open a shell:
-
-```bash
-docker exec -it debian-xfce-rdp bash
-```
-
-Remove the container:
-
-```bash
-docker rm -f debian-xfce-rdp
-```
-
-Rebuild:
-
-```bash
-docker build -t debian-xfce:2.0.0 .
-```
-
-## Performance
-
-The current version uses the RDP Graphics Pipeline with H.264/x264 instead of relying exclusively on RFX.
-
-Compared with the previous RFX-based version, H.264 provides smoother desktop motion and window updates in the tested environment.
-
-The x264 configuration prioritizes low latency:
+Inicia:
 
 ```text
-preset: ultrafast
-tune: zerolatency
-target: 60 FPS
+PipeWire
+WirePlumber
+pipewire-pulse
+XFCE
 ```
 
-Encoding is currently performed in software using x264.
+y limpia los procesos de audio cuando la sesión termina.
 
-## Versions
+## `scripts/debian-xfce`
 
-### v2.0.0
+Launcher ejecutado en el host.
 
-Major graphical transport upgrade.
+Se encarga del ciclo completo de apertura del escritorio.
 
-- Replaced TigerVNC with XRDP.
-- Added xorgxrdp.
-- Added FreeRDP launcher support.
-- Added bidirectional clipboard.
-- Added Brave Browser.
-- Added H.264 Graphics Pipeline support.
-- Added x264 software encoding.
-- Added RFX fallback.
-- Updated XRDP to 0.10.6.1.
-- Updated xorgxrdp to 0.10.5.
-- Changed the virtual xorgxrdp display from 50 Hz to 60 Hz.
-- Added automatic monitor-based window sizing.
-- Added local launcher configuration support.
+---
 
-### v1.1.0
+# Flujo de arranque
 
-- Added automatic Debian XFCE launcher.
-- Improved desktop startup workflow.
+```text
+debian-xfce
+     │
+     ▼
+Docker container
+     │
+     ▼
+start.sh
+     │
+     ├── /run/xrdp
+     ├── /run/user/1000
+     ├── xrdp-sesman
+     └── xrdp
+            │
+            ▼
+       Login RDP
+            │
+            ▼
+       .xsession
+            │
+            ▼
+     dbus-run-session
+            │
+            ▼
+    start-xfce-xrdp
+            │
+            ├── PipeWire
+            ├── WirePlumber
+            ├── pipewire-pulse
+            └── XFCE
+                    │
+                    ▼
+            pipewire-module-xrdp
+                    │
+                    ▼
+              xrdp-sink
+                    │
+                    ▼
+                 /sound
+                    │
+                    ▼
+                 Host
+```
 
-### v1.0.0
+---
 
-- Initial Debian 13 + XFCE Docker desktop.
-- TigerVNC-based remote desktop access.
+# Rendimiento
 
-## Notes
+Esta versión debe considerarse el modo **Standard** del proyecto.
 
-This project is intended for Linux hosts.
+Actualmente utiliza:
 
-Because Linux containers share the host kernel, this setup is significantly different from running a complete Debian virtual machine.
+```text
+XRDP
+xorgxrdp
+H.264
+x264 por CPU
+60 Hz
+XFCE
+```
 
-Running the image through Docker Desktop on Windows may be possible using its Linux VM / WSL2 backend, but the included Linux host launcher is not designed for native Windows usage.
+No utiliza todavía una ruta completa de GPU dentro del contenedor.
 
-## License
+Opciones como:
 
-No license has been specified yet.
+* `/dev/dri/renderD*`
+* VA-API
+* codificación H.264 mediante hardware
+* GPU passthrough parcial
+* Sunshine + Moonlight
+* Xpra
+* Waypipe
+
+pertenecen a experimentos futuros de rendimiento y no forman parte de la configuración Standard actual.
+
+El objetivo del modo Standard es mantener:
+
+* bajo consumo
+* buena compatibilidad
+* estabilidad
+* facilidad de instalación
+* buena fluidez sin convertir el contenedor en una VM pesada
+
+---
+
+# Seguridad
+
+El puerto XRDP se limita por defecto a:
+
+```text
+127.0.0.1
+```
+
+para evitar exposición directa a la red.
+
+No se recomienda publicar el puerto:
+
+```text
+0.0.0.0:3389
+```
+
+sin implementar medidas adicionales de seguridad.
+
+También se recomienda utilizar una contraseña RDP fuerte.
+
+> [!WARNING]
+> Brave todavía utiliza `--no-sandbox` en esta versión.
+>
+> Esta parte se encuentra pendiente de migración hacia una configuración con sandbox real.
+
+---
+
+# Proyecto
+
+Repositorio:
+
+```text
+https://github.com/fartavia3210-design/debian-xfce-docker
+```
+
+Proyecto relacionado:
+
+```text
+Linux Desktop Containers
+```
+
+El objetivo general es investigar y desarrollar escritorios Linux completos, ligeros y reutilizables ejecutándose dentro de contenedores Docker.
