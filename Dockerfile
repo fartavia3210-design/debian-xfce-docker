@@ -113,11 +113,6 @@ RUN curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg \
     apt-get install -y brave-browser && \
     rm -rf /var/lib/apt/lists/*
 
-RUN sed -i \
-    's#Exec=/usr/bin/brave-browser-stable#Exec=/usr/bin/brave-browser-stable --no-sandbox#g' \
-    /usr/share/applications/brave-browser.desktop \
-    /usr/share/applications/com.brave.Browser.desktop
-
 # ============================================================
 # Usuario del escritorio
 # ============================================================
