@@ -83,7 +83,6 @@ if [ -z "$RDP_USER" ] || [ -z "$RDP_PASSWORD" ]; then
     exit 1
 fi
 
-
 # Detectar automáticamente el tamaño del monitor
 get_screen_size() {
 
@@ -145,7 +144,6 @@ WINDOW_H=$(( SCREEN_H * WINDOW_PERCENT_H / 100 ))
 echo "Monitor detectado: ${SCREEN_W}x${SCREEN_H}"
 echo "Ventana Debian XFCE: ${WINDOW_W}x${WINDOW_H}"
 
-
 # Abrir Debian XFCE
 {
     printf '/v:127.0.0.1:3389\n'
@@ -154,6 +152,7 @@ echo "Ventana Debian XFCE: ${WINDOW_W}x${WINDOW_H}"
     printf '/size:%sx%s\n' "$WINDOW_W" "$WINDOW_H"
     printf '+decorations\n'
     printf '+clipboard\n'
+    printf '/sound\n'
     printf '/cert:ignore\n'
     printf '/t:Debian XFCE\n'
 } | "$RDP_CLIENT" /args-from:stdin

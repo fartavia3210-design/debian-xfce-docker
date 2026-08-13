@@ -15,10 +15,16 @@ RUN apt-get update && \
         sudo \
         curl \
         wget \
-	git \
+        git \
         ca-certificates \
         ssl-cert \
-        xserver-xorg-core && \
+        xserver-xorg-core \
+        pipewire \
+        pipewire-pulse \
+        wireplumber \
+        pipewire-module-xrdp \
+        pulseaudio-utils && \
+    apt-get purge -y pulseaudio && \
     rm -rf /var/lib/apt/lists/*
 
 # ============================================================
@@ -39,7 +45,7 @@ RUN git clone \
         libjpeg-dev \
         libopus-dev \
         libpixman-1-dev \
-        libx264-dev && \    
+        libx264-dev && \
     ./bootstrap && \
     ./configure \
         --prefix=/usr \
@@ -67,8 +73,8 @@ RUN git clone \
         --branch "v${XORGXRDP_VERSION}" \
         https://github.com/neutrinolabs/xorgxrdp.git \
         "/tmp/xorgxrdp-${XORGXRDP_VERSION}" && \
-     cd "/tmp/xorgxrdp-${XORGXRDP_VERSION}" && \
-     sed -i 's/const int vfreq = 50;/const int vfreq = 60;/' module/rdpRandR.c && \
+    cd "/tmp/xorgxrdp-${XORGXRDP_VERSION}" && \
+    sed -i 's/const int vfreq = 50;/const int vfreq = 60;/' module/rdpRandR.c && \
     ./scripts/install_xorgxrdp_build_dependencies_with_apt.sh && \
     ./bootstrap && \
     ./configure --enable-glamor && \
@@ -119,8 +125,21 @@ RUN sed -i \
 RUN useradd -m -s /bin/bash debian && \
     usermod -aG sudo debian
 
-RUN echo "startxfce4" > /home/debian/.xsession && \
+# ============================================================
+# Sesión XFCE + audio XRDP
+# ============================================================
+
+COPY start-xfce-xrdp /usr/local/bin/start-xfce-xrdp
+
+RUN chmod +x /usr/local/bin/start-xfce-xrdp && \
+    printf '%s\n' \
+        'exec dbus-run-session -- /usr/local/bin/start-xfce-xrdp' \
+        > /home/debian/.xsession && \
     chown debian:debian /home/debian/.xsession
+
+# ============================================================
+# Arranque del contenedor
+# ============================================================
 
 COPY start.sh /usr/local/bin/start-rdp
 

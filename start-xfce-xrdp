@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+
+set -u
+
+# ============================================================
+# Runtime de usuario para PipeWire
+# ============================================================
+
+export XDG_RUNTIME_DIR="/run/user/${UID}"
+
+if [ ! -d "$XDG_RUNTIME_DIR" ]; then
+    echo "ERROR: XDG_RUNTIME_DIR no existe: $XDG_RUNTIME_DIR"
+    exit 1
+fi
+
+# ============================================================
+# PipeWire
+# ============================================================
+
+/usr/bin/pipewire >"/tmp/pipewire-${UID}.log" 2>&1 &
+PW_PID=$!
+
+for i in {1..50}; do
+    if /usr/bin/pw-cli info 0 >/dev/null 2>&1; then
+        break
+    fi
+
+    sleep 0.1
+done
+
+# ============================================================
+# WirePlumber
+# ============================================================
+
+/usr/bin/wireplumber >"/tmp/wireplumber-${UID}.log" 2>&1 &
+WP_PID=$!
+
+# ============================================================
+# Compatibilidad PulseAudio sobre PipeWire
+# ============================================================
+
+/usr/bin/pipewire-pulse >"/tmp/pipewire-pulse-${UID}.log" 2>&1 &
+PULSE_PID=$!
+
+for i in {1..50}; do
+    if /usr/bin/pactl info >/dev/null 2>&1; then
+        break
+    fi
+
+    sleep 0.1
+done
+
+# ============================================================
+# XFCE
+#
+# pipewire-module-xrdp se carga mediante XDG autostart
+# dentro de la sesión gráfica.
+# ============================================================
+
+/usr/bin/startxfce4
+
+STATUS=$?
+
+# ============================================================
+# Limpieza al cerrar la sesión
+# ============================================================
+
+kill "$PULSE_PID" "$WP_PID" "$PW_PID" 2>/dev/null || true
+wait "$PULSE_PID" "$WP_PID" "$PW_PID" 2>/dev/null || true
+
+exit "$STATUS"
